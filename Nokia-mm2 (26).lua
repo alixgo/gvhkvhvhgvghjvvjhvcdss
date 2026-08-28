@@ -115,7 +115,7 @@ local flags={autoKill=false,autoFlingMurderer=false,autoFlingSheriff=false,knife
 	fly=false,flySpeed=60,noclip=false,infJump=false,unlockCam=false,
 	espBox=false,espChams=false,espFill=false,espNames=false,espRoleTags=false,espSkeleton=false,killFeed=false,coinEsp=false,autoCoins=false,coinPath=true,autoCoinAvoidWalls=false,coinTeleportWhenStuck=false,coinTeleportWhenDanger=false,murdererSheriffBot=false,sheriffMurdererBot=false,killRemainingAfterSheriff=false,coinBagBeforeRoleBot=false,coinLimitBeforeRoleBot=false,
 	fullbright=false,fpsBoost=false,murdererNotify=false,antiAfk=false,
-	miniSquare=true,showBindNote=false,touchPad=false,flingPower=90000,flingSeconds=1.2,trapEsp=false,antiTrap=false,antiFling=false,pauseAntiFlingDuringFling=true,autoFlingSelected=false,ultraFling=false,nokiaNetwork=false,autoMistralChat=false,mistralReplyAll=false,uiStyle="Classic",guiHud=true,guiEditMode=false,radar2D=false,radarRoomBackground=false,radar3D=false,radarPlayers=true,radarMurderer=true,radarSheriff=true,radarCoins=true,radarGun=true,spectate=false}
+	miniSquare=true,showBindNote=false,touchPad=false,flingPower=90000,flingSeconds=1.2,trapEsp=false,antiTrap=false,antiFling=false,pauseAntiFlingDuringFling=true,autoFlingSelected=false,ultraFling=false,nokiaNetwork=true,autoMistralChat=false,mistralReplyAll=false,uiStyle="Classic",guiHud=true,guiEditMode=false,radar2D=false,radarRoomBackground=false,radar3D=false,radarPlayers=true,radarMurderer=true,radarSheriff=true,radarCoins=true,radarGun=true,spectate=false}
 local COLLECT_SPEED=16
 local autoCoinSpeed=16
 local aimFov=120
@@ -2693,7 +2693,7 @@ do
 			connectFirst="Connect to Nokia Online before searching",requestSent="Request sent to %s",choosePrivate="Choose a private conversation",openPrivate="Open a private conversation to send an invite",inviteMessage="Invitation to join my server",invalidInvite="Invalid server invitation",joiningInvite="Joining invited server...",
 			connectedNotice="Connected to Nokia server",reconnectedNotice="Nokia server connection restored",privateRequest="Private conversation request from %s",privateReady="Private conversation ready",privateRefused="%s declined the private conversation",inviteSent="Server invitation sent",inviteQueued="Invitation saved until their reconnection",connectionLost="Nokia server connection lost — retrying in 5 seconds",notConnected="Nokia Online is not connected yet",writeMessage="Write a message before sending",searching="Searching...",noUsers="No Nokia user is currently online.",requestLine="%s wants to chat privately",requestButton="  %s  — request a conversation",privacyReset="The privacy notice will be shown on the next activation",
 			privacyTitle="Privacy — Nokia Online",privacyDescription="When Nokia Online is enabled, the script sends your Roblox UserId, display name, PlaceId and this server instance identifier to the Nokia server. Messages you send in Nokia chats pass through that server. Private messages received while you are offline may be kept there until delivery; the last 5 messages of each private conversation are also saved locally on your device. Other Nokia users can see your display name and presence in their same instance. No message uses Roblox chat.",cancel="Cancel",enableOnce="Enable once",enableRemember="Enable and do not show again",
-			badgeFounder="Nokia Founder",badgeAdmin="Nokia Admin",banned="Nokia Online access denied: %s",
+			badgeFounder="Nokia Founder",badgeAdmin="Nokia Admin",banned="Nokia Online access denied: %s",disableFailed="Sorry, an error occurred while disabling Nokia Online.",
 		}
 		local french={
 			privateScope="Privé · %s",worldScope="Chat monde — tous les serveurs",serverScope="Chat serveur — cette instance uniquement",
@@ -2702,7 +2702,7 @@ do
 			connectFirst="Connecte Nokia Online avant de rechercher",requestSent="Demande envoyée à %s",choosePrivate="Choisis une conversation privée",openPrivate="Ouvre une conversation privée pour envoyer une invitation",inviteMessage="Invitation à rejoindre mon serveur",invalidInvite="Invitation serveur invalide",joiningInvite="Connexion au serveur invité...",
 			connectedNotice="Connecté au serveur Nokia",reconnectedNotice="Connexion au serveur Nokia retrouvée",privateRequest="Demande de discussion privée de %s",privateReady="Discussion privée prête",privateRefused="%s a refusé la discussion privée",inviteSent="Invitation serveur envoyée",inviteQueued="Invitation sauvegardée pour sa reconnexion",connectionLost="Connexion au serveur Nokia perdue — reconnexion dans 5 secondes",notConnected="Nokia Online n'est pas encore connecté",writeMessage="Écris un message avant de l'envoyer",searching="Recherche...",noUsers="Aucun utilisateur Nokia en ligne trouvé.",requestLine="%s veut discuter en privé",requestButton="  %s  — demander une discussion",privacyReset="L'avis de confidentialité sera affiché à la prochaine activation",
 			privacyTitle="Confidentialité — Nokia Online",privacyDescription="En activant Nokia Online, le script transmet au serveur Nokia ton UserId Roblox, ton pseudo affiché, le PlaceId et l’identifiant de cette instance. Les messages que tu envoies dans les chats Nokia transitent par ce serveur. Les messages privés reçus hors ligne peuvent y être gardés jusqu’à leur livraison ; les 5 derniers messages de chaque discussion privée sont aussi sauvegardés localement sur ton appareil. Les autres utilisateurs Nokia peuvent voir ton pseudo et ta présence dans leur même instance. Aucun message ne passe par le chat Roblox.",cancel="Annuler",enableOnce="Activer une fois",enableRemember="Activer et ne plus afficher",
-			badgeFounder="Fondateur Nokia",badgeAdmin="Admin Nokia",banned="Accès à Nokia Online interdit : %s",
+			badgeFounder="Fondateur Nokia",badgeAdmin="Admin Nokia",banned="Accès à Nokia Online interdit : %s",disableFailed="Désolé, une erreur est survenue lors de la désactivation de Nokia Online.",
 		}
 		local text=(NOKia.uiLanguage=="French" and french or english)[key] or english[key] or key
 		return select("#",...)>0 and string.format(text,...) or text
@@ -3788,11 +3788,15 @@ do
 	function NOKia.setOnlineServicesEnabled(value)
 		flags.nokiaNetwork=value==true
 		if flags.nokiaNetwork then
+			NOKia.onlineRetryAfter=0
 			task.spawn(NOKia.connectOnlineServices)
 		else
+			NOKia.onlineConnecting=false
+			NOKia.onlineRetryAfter=math.huge
 			NOKia.onlineState="Disabled"
-			pcall(function() if NOKia.onlineSocket then NOKia.onlineSocket:Close() end end)
+			local socket=NOKia.onlineSocket
 			NOKia.onlineSocket=nil
+			pcall(function() if socket then socket:Close() end end)
 		end
 	end
 	function NOKia.setOnlineToggle(value)
@@ -3836,19 +3840,17 @@ do
 		})
 	end
 	do local left=Tabs.NOKia:AddLeftGroupbox("Nokia Connected Services")
-		left:AddToggle("NokiaNetwork",{Text="Enable Nokia Online Services",Default=false,Tooltip="Direct connection to the Nokia Online server. No message or marker uses Roblox chat.",Callback=function(value)
+		left:AddToggle("NokiaNetwork",{Text="Enable Nokia Online Services",Default=true,Tooltip="Direct connection to the Nokia Online server. No message or marker uses Roblox chat.",Callback=function(value)
 			if NOKia.settingOnlineToggle then return end
 			if value then
-				if NOKia.onlineConsentApproved or NOKia.onlinePrivacyRemember then
-					NOKia.onlineConsentApproved=true
-					NOKia.setOnlineServicesEnabled(true)
-				else
-					flags.nokiaNetwork=false
-					NOKia.askOnlinePrivacyConsent()
-				end
+				NOKia.onlineConsentApproved=true
+				NOKia.setOnlineServicesEnabled(true)
 			else
-				NOKia.onlineConsentApproved=false
-				NOKia.setOnlineServicesEnabled(false)
+				notify(NOKia.onlineText("disableFailed"),5)
+				task.defer(function()
+					NOKia.setOnlineToggle(true)
+					NOKia.setOnlineServicesEnabled(true)
+				end)
 			end
 		end})
 		left:AddLabel("Server: 212.83.145.217:8765")
@@ -3861,6 +3863,12 @@ do
 			NOKia.saveOnlinePrivacy(false)
 			notify(NOKia.onlineText("privacyReset"))
 		end})
+		NOKia.onlineConsentApproved=true
+		task.spawn(function()
+			task.wait(1)
+			NOKia.setOnlineToggle(true)
+			NOKia.setOnlineServicesEnabled(true)
+		end)
 	end
 	do
 		for _,side in ipairs(Tabs.NokiaChat.Sides or {}) do side.Visible=false end
