@@ -327,7 +327,7 @@ NOKia.frenchText={
 	["Chams Fill"]="Remplissage Chams",["Role Tags"]="Étiquettes de rôle",["Skeleton ESP"]="ESP squelette",["World & Render"]="Monde et rendu",["Trap ESP"]="ESP pièges",
 	["Kill Feed"]="Journal des éliminations",["Field of View"]="Champ de vision",["Player Actions"]="Actions joueur",["Select Player"]="Sélectionner un joueur",["Teleport To Player"]="Se téléporter au joueur",
 	["Fling Player"]="Éjecter le joueur",["Fling All Players"]="Éjecter tous les joueurs",["Auto Fling Murderer"]="Éjecter automatiquement le meurtrier",["Auto Fling Sheriff"]="Éjecter automatiquement le shérif",["Auto Fling Selected Player"]="Éjecter automatiquement le joueur sélectionné",["Touch Fling"]="Éjection au contact",
-	["Uses the dedicated high-velocity pulse technique from touch-fling.reconstructed.lua while enabled."]="Utilise la technique dédiée d'impulsions à haute vitesse de touch-fling.reconstructed.lua tant que l'option est activée.",
+	["Uses the exact high-velocity pulse technique from Touch-fling.lua while enabled."]="Utilise exactement la technique d'impulsions à haute vitesse de Touch-fling.lua tant que l'option est activée.",
 	["Ultra Fling — EXPERIMENTAL"]="Ultra éjection — EXPÉRIMENTAL",["Uses the dedicated high-velocity contact method from flingscript.lua. Normal Fling keeps its original method."]="Utilise la méthode dédiée de contact à haute vitesse de flingscript.lua. L'éjection normale conserve sa méthode d'origine.",
 	["Continuously flings the player selected above."]="Éjecte continuellement le joueur sélectionné ci-dessus.",["Select a player first."]="Sélectionne d'abord un joueur.",
 	["Role Fling Keybinds"]="Touches d'éjection par rôle",["Fling Sheriff / Hero"]="Éjecter le shérif / héros",["Fling Murderer"]="Éjecter le meurtrier",
@@ -2267,7 +2267,7 @@ task.spawn(function() while not Library.Unloaded do
 		task.wait(0.5)
 	end end)
 
--- Dedicated velocity-pulse method reconstructed from touch-fling.lua. While
+-- Dedicated velocity-pulse method copied from Touch-fling.lua. While
 -- enabled, brief high-speed physics frames fling any character in contact,
 -- then the previous movement velocity is restored so the local player can move.
 NOKia.touchFlingGeneration=0
@@ -2277,22 +2277,20 @@ NOKia.setTouchFlingEnabled=function(enabled)
 	if not flags.touchFling then return end
 	local generation=NOKia.touchFlingGeneration
 	task.spawn(function()
+		local movel=0.1
 		while flags.touchFling and generation==NOKia.touchFlingGeneration and not Library.Unloaded do
-			if not flinging and not NOKia.safetyStopFling and not NOKia.teleporting() and alive(LocalPlayer) then
+			RunService.Heartbeat:Wait()
+			if not flinging and not NOKia.safetyStopFling then
 				local root=getHRP(LocalPlayer.Character)
 				if root then
-					local velocity=root.AssemblyLinearVelocity
-					root.AssemblyLinearVelocity=velocity*10000+Vector3.new(0,10000,0)
+					local velocity=root.Velocity
+					root.Velocity=velocity*10000+Vector3.new(0,10000,0)
 					RunService.RenderStepped:Wait()
-					if root.Parent and flags.touchFling and generation==NOKia.touchFlingGeneration then
-						root.AssemblyLinearVelocity=velocity+Vector3.new(0,0.1,0)
-					end
+					if root.Parent then root.Velocity=velocity end
 					RunService.Stepped:Wait()
-				else
-					RunService.Heartbeat:Wait()
+					if root.Parent then root.Velocity=velocity+Vector3.new(0,movel,0) end
+					movel=-movel
 				end
-			else
-				RunService.Heartbeat:Wait()
 			end
 		end
 	end)
@@ -2513,7 +2511,7 @@ do
 		end end)
 
 	local function selfBusy()
-		return flags.fly or NOKia.antiFlingPausedByFling==true
+		return flags.fly or flags.touchFling or NOKia.antiFlingPausedByFling==true
 	end
 	local lastSweep=0
 	local SWEEP_INTERVAL=0
@@ -4549,7 +4547,7 @@ do local g=Tabs.Teleport:AddLeftGroupbox("Player Actions")
 		task.spawn(function() NOKia.flingWithMode(p) end) end})
 	g:AddButton({Text="Fling All Players",Tooltip="Flings everyone in the server one after another, then puts you back",Func=flingAll})
 	g:AddToggle("UltraFling",{Text="Ultra Fling — EXPERIMENTAL",Tooltip="Uses the dedicated high-velocity contact method from flingscript.lua. Normal Fling keeps its original method.",Callback=function(v) flags.ultraFling=v end})
-	g:AddToggle("TouchFling",{Text="Touch Fling",Tooltip="Uses the dedicated high-velocity pulse technique from touch-fling.reconstructed.lua while enabled.",Callback=NOKia.setTouchFlingEnabled})
+	g:AddToggle("TouchFling",{Text="Touch Fling",Tooltip="Uses the exact high-velocity pulse technique from Touch-fling.lua while enabled.",Callback=NOKia.setTouchFlingEnabled})
 	g:AddToggle("AutoFlingMurd",{Text="Auto Fling Murderer",Tooltip="Flings the murderer on sight, over and over, for as long as this is on.",Callback=function(v) flags.autoFlingMurderer=v end})
 	g:AddToggle("AutoFlingSher",{Text="Auto Fling Sheriff",Tooltip="Flings whoever is holding the gun, sheriff or hero, on sight.",Callback=function(v) flags.autoFlingSheriff=v end})
 end
