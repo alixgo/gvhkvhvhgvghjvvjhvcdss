@@ -93,9 +93,35 @@ end
 if typeof(loadstring)~="function" then
 	return error("[NOKia] Your executor has no loadstring, which the UI library needs.",0)
 end
-local Library=loadstring(srcs[1])()
-local ThemeManager=loadstring(srcs[2])()
-local SaveManager=loadstring(srcs[3])()
+-- A stale/corrupted executor cache used to make `loadstring(...)()` fail with
+-- the unhelpful "attempt to call a nil value" error before the menu appeared.
+-- Validate the cached module and retry its source once from GitHub.
+local function loadUiModule(index,label)
+	local function execute(source)
+		local chunk,compileError=loadstring(source)
+		if type(chunk)~="function" then return false,nil,"compile error: "..tostring(compileError) end
+		local ok,result=pcall(chunk)
+		if not ok then return false,nil,"runtime error: "..tostring(result) end
+		if result==nil then return false,nil,"module returned no value" end
+		return true,result
+	end
+	local ok,module,reason=execute(srcs[index])
+	if ok then return module end
+	local fetched,fresh=pcall(function() return game:HttpGet(repo..({"Library.lua","addons/ThemeManager.lua","addons/SaveManager.lua"})[index]) end)
+	if fetched and type(fresh)=="string" and #fresh>100 then
+		srcs[index]=fresh
+		pcall(function()
+			local cache={"NOKia_MM2/ui_cache/Library.lua","NOKia_MM2/ui_cache/ThemeManager.lua","NOKia_MM2/ui_cache/SaveManager.lua"}
+			if typeof(writefile)=="function" then writefile(cache[index],fresh) end
+		end)
+		ok,module,reason=execute(fresh)
+		if ok then return module end
+	end
+	return error("[NOKia] UI module '"..label.."' could not load: "..tostring(reason),0)
+end
+local Library=loadUiModule(1,"Library")
+local ThemeManager=loadUiModule(2,"ThemeManager")
+local SaveManager=loadUiModule(3,"SaveManager")
 local Options=Library.Options
 local Toggles=Library.Toggles
 
