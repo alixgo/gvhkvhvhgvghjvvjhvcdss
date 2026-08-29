@@ -2280,20 +2280,25 @@ local function touchFlingTarget(hit)
 	if now-(touchFlingLastHit[player] or -math.huge)<3 then return end
 	touchFlingLastHit[player]=now
 	task.spawn(function()
-		if flags.touchFling and not flinging and alive(player) then
+		if flags.touchFling and not flinging and alive(player) and type(NOKia.flingWithMode)=="function" then
 			NOKia.flingWithMode(player)
 		end
 	end)
 end
 local function bindTouchFlingCharacter(character)
+	if not character then return end
 	local function watch(part)
-		if part:IsA("BasePart") then bind(part.Touched,touchFlingTarget) end
+		if part:IsA("BasePart") then
+			pcall(function() bind(part.Touched,touchFlingTarget) end)
+		end
 	end
 	for _,part in ipairs(character:GetDescendants()) do watch(part) end
-	bind(character.DescendantAdded,watch)
+	pcall(function() bind(character.DescendantAdded,watch) end)
 end
-if LocalPlayer.Character then bindTouchFlingCharacter(LocalPlayer.Character) end
-bind(LocalPlayer.CharacterAdded,bindTouchFlingCharacter)
+pcall(function()
+	if LocalPlayer.Character then bindTouchFlingCharacter(LocalPlayer.Character) end
+	bind(LocalPlayer.CharacterAdded,bindTouchFlingCharacter)
+end)
 
 local MURD_ALERT_RANGE=50
 local murdNotif=nil
@@ -4765,11 +4770,9 @@ do local g=Tabs.Server:AddLeftGroupbox("This Server")
 			pcall(function()
 				setRow("Players",#Players:GetPlayers().."/"..Players.MaxPlayers)
 				setRow("Region",region)
-				local stype
-				if game.PrivateServerId=="" then stype="Public"
-				elseif game.PrivateServerOwnerId==0 then stype="Reserved"
-				else stype="Private (VIP)" end
-				setRow("Server Type",stype)
+				-- PrivateServerId/OwnerId are server-only properties. Reading them
+				-- from a LocalScript emits a warning on recent Roblox clients.
+				setRow("Server Type","Not available on client")
 				local up=math.floor(workspace.DistributedGameTime)
 				setRow("Uptime",string.format("%dm %ds",up//60,up%60))
 				setRow("Your Ping",math.floor(netPing()*1000).."ms")
