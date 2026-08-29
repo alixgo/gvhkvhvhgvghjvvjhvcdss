@@ -93,35 +93,9 @@ end
 if typeof(loadstring)~="function" then
 	return error("[NOKia] Your executor has no loadstring, which the UI library needs.",0)
 end
--- A stale/corrupted executor cache used to make `loadstring(...)()` fail with
--- the unhelpful "attempt to call a nil value" error before the menu appeared.
--- Validate the cached module and retry its source once from GitHub.
-local function loadUiModule(index,label)
-	local function execute(source)
-		local chunk,compileError=loadstring(source)
-		if type(chunk)~="function" then return false,nil,"compile error: "..tostring(compileError) end
-		local ok,result=pcall(chunk)
-		if not ok then return false,nil,"runtime error: "..tostring(result) end
-		if result==nil then return false,nil,"module returned no value" end
-		return true,result
-	end
-	local ok,module,reason=execute(srcs[index])
-	if ok then return module end
-	local fetched,fresh=pcall(function() return game:HttpGet(repo..({"Library.lua","addons/ThemeManager.lua","addons/SaveManager.lua"})[index]) end)
-	if fetched and type(fresh)=="string" and #fresh>100 then
-		srcs[index]=fresh
-		pcall(function()
-			local cache={"NOKia_MM2/ui_cache/Library.lua","NOKia_MM2/ui_cache/ThemeManager.lua","NOKia_MM2/ui_cache/SaveManager.lua"}
-			if typeof(writefile)=="function" then writefile(cache[index],fresh) end
-		end)
-		ok,module,reason=execute(fresh)
-		if ok then return module end
-	end
-	return error("[NOKia] UI module '"..label.."' could not load: "..tostring(reason),0)
-end
-local Library=loadUiModule(1,"Library")
-local ThemeManager=loadUiModule(2,"ThemeManager")
-local SaveManager=loadUiModule(3,"SaveManager")
+local Library=loadstring(srcs[1])()
+local ThemeManager=loadstring(srcs[2])()
+local SaveManager=loadstring(srcs[3])()
 local Options=Library.Options
 local Toggles=Library.Toggles
 
@@ -2295,35 +2269,35 @@ task.spawn(function() while not Library.Unloaded do
 
 -- Touch Fling is event-driven instead of polling distance: a player must make
 -- physical contact with one of our character parts before they are selected.
-local touchFlingLastHit=setmetatable({},{__mode="k"})
-local function touchFlingTarget(hit)
+NOKia.touchFlingLastHit=setmetatable({},{__mode="k"})
+NOKia.touchFlingTarget=function(hit)
 	if not flags.touchFling or flinging or NOKia.safetyStopFling or NOKia.teleporting() then return end
 	local model=hit and hit:FindFirstAncestorOfClass("Model")
 	local player=model and Players:GetPlayerFromCharacter(model)
 	if not player or player==LocalPlayer or not alive(LocalPlayer) or not alive(player) then return end
 	if not (player.Character and getHRP(player.Character)) then return end
 	local now=os.clock()
-	if now-(touchFlingLastHit[player] or -math.huge)<3 then return end
-	touchFlingLastHit[player]=now
+	if now-(NOKia.touchFlingLastHit[player] or -math.huge)<3 then return end
+	NOKia.touchFlingLastHit[player]=now
 	task.spawn(function()
 		if flags.touchFling and not flinging and alive(player) and type(NOKia.flingWithMode)=="function" then
 			NOKia.flingWithMode(player)
 		end
 	end)
 end
-local function bindTouchFlingCharacter(character)
+NOKia.bindTouchFlingCharacter=function(character)
 	if not character then return end
 	local function watch(part)
 		if part:IsA("BasePart") then
-			pcall(function() bind(part.Touched,touchFlingTarget) end)
+			pcall(function() bind(part.Touched,NOKia.touchFlingTarget) end)
 		end
 	end
 	for _,part in ipairs(character:GetDescendants()) do watch(part) end
 	pcall(function() bind(character.DescendantAdded,watch) end)
 end
 pcall(function()
-	if LocalPlayer.Character then bindTouchFlingCharacter(LocalPlayer.Character) end
-	bind(LocalPlayer.CharacterAdded,bindTouchFlingCharacter)
+	if LocalPlayer.Character then NOKia.bindTouchFlingCharacter(LocalPlayer.Character) end
+	bind(LocalPlayer.CharacterAdded,NOKia.bindTouchFlingCharacter)
 end)
 
 local MURD_ALERT_RANGE=50
