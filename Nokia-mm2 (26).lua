@@ -115,7 +115,7 @@ local flags={autoKill=false,autoFlingMurderer=false,autoFlingSheriff=false,knife
 	fly=false,flySpeed=60,noclip=false,infJump=false,unlockCam=false,
 	espBox=false,espChams=false,espFill=false,espNames=false,espRoleTags=false,espSkeleton=false,killFeed=false,coinEsp=false,autoCoins=false,coinPath=true,autoCoinAvoidWalls=false,coinTeleportWhenStuck=false,coinTeleportWhenDanger=false,murdererSheriffBot=false,sheriffMurdererBot=false,killRemainingAfterSheriff=false,coinBagBeforeRoleBot=false,coinLimitBeforeRoleBot=false,
 	fullbright=false,fpsBoost=false,murdererNotify=false,antiAfk=false,
-	miniSquare=true,showBindNote=false,touchPad=false,flingPower=90000,flingSeconds=1.2,trapEsp=false,antiTrap=false,antiFling=false,pauseAntiFlingDuringFling=true,autoFlingSelected=false,ultraFling=false,nokiaNetwork=true,autoMistralChat=false,mistralReplyAll=false,uiStyle="Classic",guiHud=true,guiEditMode=false,radar2D=false,radarRoomBackground=false,radar3D=false,radarPlayers=true,radarMurderer=true,radarSheriff=true,radarCoins=true,radarGun=true,spectate=false}
+	miniSquare=true,showBindNote=false,touchPad=false,flingPower=90000,flingSeconds=1.2,trapEsp=false,antiTrap=false,antiFling=false,pauseAntiFlingDuringFling=true,autoFlingSelected=false,touchFling=false,ultraFling=false,nokiaNetwork=true,autoMistralChat=false,mistralReplyAll=false,uiStyle="Classic",guiHud=true,guiEditMode=false,radar2D=false,radarRoomBackground=false,radar3D=false,radarPlayers=true,radarMurderer=true,radarSheriff=true,radarCoins=true,radarGun=true,spectate=false}
 local COLLECT_SPEED=16
 local autoCoinSpeed=16
 local aimFov=120
@@ -326,7 +326,8 @@ NOKia.frenchText={
 	["Add Round Status Widget"]="Ajouter le widget statut de manche",["Add FOV Widget"]="Ajouter le widget FOV",["Player ESP"]="ESP joueurs",["Nametag ESP"]="ESP des noms",["Box ESP"]="ESP encadré",
 	["Chams Fill"]="Remplissage Chams",["Role Tags"]="Étiquettes de rôle",["Skeleton ESP"]="ESP squelette",["World & Render"]="Monde et rendu",["Trap ESP"]="ESP pièges",
 	["Kill Feed"]="Journal des éliminations",["Field of View"]="Champ de vision",["Player Actions"]="Actions joueur",["Select Player"]="Sélectionner un joueur",["Teleport To Player"]="Se téléporter au joueur",
-	["Fling Player"]="Éjecter le joueur",["Fling All Players"]="Éjecter tous les joueurs",["Auto Fling Murderer"]="Éjecter automatiquement le meurtrier",["Auto Fling Sheriff"]="Éjecter automatiquement le shérif",["Auto Fling Selected Player"]="Éjecter automatiquement le joueur sélectionné",
+	["Fling Player"]="Éjecter le joueur",["Fling All Players"]="Éjecter tous les joueurs",["Auto Fling Murderer"]="Éjecter automatiquement le meurtrier",["Auto Fling Sheriff"]="Éjecter automatiquement le shérif",["Auto Fling Selected Player"]="Éjecter automatiquement le joueur sélectionné",["Touch Fling"]="Éjection au contact",
+	["Automatically flings any player who touches your character. Each player has a short cooldown to prevent repeat triggers."]="Éjecte automatiquement tout joueur qui touche ton personnage. Chaque joueur a un court délai pour éviter les déclenchements répétés.",
 	["Ultra Fling — EXPERIMENTAL"]="Ultra éjection — EXPÉRIMENTAL",["Uses the dedicated high-velocity contact method from flingscript.lua. Normal Fling keeps its original method."]="Utilise la méthode dédiée de contact à haute vitesse de flingscript.lua. L'éjection normale conserve sa méthode d'origine.",
 	["Continuously flings the player selected above."]="Éjecte continuellement le joueur sélectionné ci-dessus.",["Select a player first."]="Sélectionne d'abord un joueur.",
 	["Role Fling Keybinds"]="Touches d'éjection par rôle",["Fling Sheriff / Hero"]="Éjecter le shérif / héros",["Fling Murderer"]="Éjecter le meurtrier",
@@ -2208,12 +2209,12 @@ NOKia.activateSafetyMode=function()
 	for _,name in ipairs({
 		"Fly","Noclip","AutoCoins","AutoKill","MurdererSheriffBot","SheriffMurdererBot",
 		"CoinBagBeforeRoleBot","CoinLimitBeforeRoleBot","AutoFlingMurd","AutoFlingSher",
-		"AutoFlingSelected","AutoGun","CoinTeleportWhenStuck","CoinTeleportWhenDanger"
+		"AutoFlingSelected","TouchFling","AutoGun","CoinTeleportWhenStuck","CoinTeleportWhenDanger"
 	}) do
 		local control=Toggles[name]
 		if control and control.Value then pcall(function() control:SetValue(false) end) end
 	end
-	for _,name in ipairs({"fly","noclip","autoCoins","autoKill","murdererSheriffBot","sheriffMurdererBot","coinBagBeforeRoleBot","coinLimitBeforeRoleBot","autoFlingMurderer","autoFlingSheriff","autoFlingSelected","autoGun","coinTeleportWhenStuck","coinTeleportWhenDanger"}) do
+	for _,name in ipairs({"fly","noclip","autoCoins","autoKill","murdererSheriffBot","sheriffMurdererBot","coinBagBeforeRoleBot","coinLimitBeforeRoleBot","autoFlingMurderer","autoFlingSheriff","autoFlingSelected","touchFling","autoGun","coinTeleportWhenStuck","coinTeleportWhenDanger"}) do
 		flags[name]=false
 	end
 	stopFly()
@@ -2265,6 +2266,34 @@ task.spawn(function() while not Library.Unloaded do
 		end
 		task.wait(0.5)
 	end end)
+
+-- Touch Fling is event-driven instead of polling distance: a player must make
+-- physical contact with one of our character parts before they are selected.
+local touchFlingLastHit=setmetatable({},{__mode="k"})
+local function touchFlingTarget(hit)
+	if not flags.touchFling or flinging or NOKia.safetyStopFling or NOKia.teleporting() then return end
+	local model=hit and hit:FindFirstAncestorOfClass("Model")
+	local player=model and Players:GetPlayerFromCharacter(model)
+	if not player or player==LocalPlayer or not alive(LocalPlayer) or not alive(player) then return end
+	if not (player.Character and getHRP(player.Character)) then return end
+	local now=os.clock()
+	if now-(touchFlingLastHit[player] or -math.huge)<3 then return end
+	touchFlingLastHit[player]=now
+	task.spawn(function()
+		if flags.touchFling and not flinging and alive(player) then
+			NOKia.flingWithMode(player)
+		end
+	end)
+end
+local function bindTouchFlingCharacter(character)
+	local function watch(part)
+		if part:IsA("BasePart") then bind(part.Touched,touchFlingTarget) end
+	end
+	for _,part in ipairs(character:GetDescendants()) do watch(part) end
+	bind(character.DescendantAdded,watch)
+end
+if LocalPlayer.Character then bindTouchFlingCharacter(LocalPlayer.Character) end
+bind(LocalPlayer.CharacterAdded,bindTouchFlingCharacter)
 
 local MURD_ALERT_RANGE=50
 local murdNotif=nil
@@ -4517,6 +4546,7 @@ do local g=Tabs.Teleport:AddLeftGroupbox("Player Actions")
 		task.spawn(function() NOKia.flingWithMode(p) end) end})
 	g:AddButton({Text="Fling All Players",Tooltip="Flings everyone in the server one after another, then puts you back",Func=flingAll})
 	g:AddToggle("UltraFling",{Text="Ultra Fling — EXPERIMENTAL",Tooltip="Uses the dedicated high-velocity contact method from flingscript.lua. Normal Fling keeps its original method.",Callback=function(v) flags.ultraFling=v end})
+	g:AddToggle("TouchFling",{Text="Touch Fling",Tooltip="Automatically flings any player who touches your character. Each player has a short cooldown to prevent repeat triggers.",Callback=function(v) flags.touchFling=v end})
 	g:AddToggle("AutoFlingMurd",{Text="Auto Fling Murderer",Tooltip="Flings the murderer on sight, over and over, for as long as this is on.",Callback=function(v) flags.autoFlingMurderer=v end})
 	g:AddToggle("AutoFlingSher",{Text="Auto Fling Sheriff",Tooltip="Flings whoever is holding the gun, sheriff or hero, on sight.",Callback=function(v) flags.autoFlingSheriff=v end})
 end
@@ -5126,7 +5156,7 @@ do
 		AutoKill="Auto Kill",Fly="Fly",Noclip="Noclip",InfJump="Infinite Jump",AutoCoins="Auto Collect Coins",AutoCoinAvoidWalls="Smart Walking Mode",CoinTeleportWhenStuck="Teleport If Completely Stuck",CoinTeleportWhenDanger="Emergency Teleport From Murderer",CoinPath="Show 10-Coin Route",CollectAllMapCoinsKey="Collect All Map Coins Key",
 		MurdererSheriffBot="Auto Kill Sheriff",SheriffMurdererBot="Auto Kill Murderer",KillRemainingAfterSheriff="Kill Remaining Players",CoinBagBeforeRoleBot="Auto Collect Until Bag Full",
 		CoinLimitBeforeRoleBot="Use Specific Coin Limit",KnifeWalls="Knife Through Walls",GunWalls="Gun Through Walls",Aimbot="Aimbot",SilentAim="Knife Silent Aim",
-		EspNames="Nametag ESP",EspBox="Box ESP",EspChams="Chams",CoinEsp="Coin ESP",Fullbright="Fullbright",FpsBoost="FPS Boost",AntiFling="Anti Fling",PauseAntiFlingDuringFling="Pause Anti Fling During Fling",AntiAfk="Anti-AFK",AutoFlingSelected="Auto Fling Selected Player",UltraFling="Ultra Fling — EXPERIMENTAL",NokiaNetwork="Activer Nokia Online Services",AutoMistralChat="Reply When Mentioned",MistralReplyAll="EXPERIMENTAL — Reply To Every Message",MistralModel="Mistral Model",MistralPersona="Chat Personality",
+		EspNames="Nametag ESP",EspBox="Box ESP",EspChams="Chams",CoinEsp="Coin ESP",Fullbright="Fullbright",FpsBoost="FPS Boost",AntiFling="Anti Fling",PauseAntiFlingDuringFling="Pause Anti Fling During Fling",AntiAfk="Anti-AFK",AutoFlingSelected="Auto Fling Selected Player",TouchFling="Touch Fling",UltraFling="Ultra Fling — EXPERIMENTAL",NokiaNetwork="Activer Nokia Online Services",AutoMistralChat="Reply When Mentioned",MistralReplyAll="EXPERIMENTAL — Reply To Every Message",MistralModel="Mistral Model",MistralPersona="Chat Personality",
 		GuiHud="Show Custom HUD",GuiEditMode="Edit Mode",Language="Language",UIStyle="Interface Style",ThemePick="Theme",FlyKey="Fly Key",NoclipKey="Noclip Key",AimKey="Aimbot Key",MenuKeybind="Menu Key",FlingSheriffKey="Fling Sheriff Key",FlingMurdererKey="Fling Murderer Key",OneShotRoleKillKey="One-Shot Role Attack Key",KillExceptSheriffKey="Kill Everyone Except Sheriff Key",CollectAllMapCoinsKey="Collect All Map Coins Key",SafetyModeKey="Safety Mode Key",
 	}
 	local function saveCurrentSettings()
