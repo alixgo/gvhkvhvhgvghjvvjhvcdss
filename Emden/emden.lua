@@ -21,9 +21,10 @@ end
 local Settings = {
     Visuals  = { Enable=false,Box=false,Name=false,Health=false,Distance=false,Skeleton=false,Snaplines=false,Weapon=false,MaxDistance=1000 },
     ESPColors= { Box=Color3.fromRGB(255,255,255) },
-    Movement = { Noclip=false,NoFallDamage=false,ClickTP=false },
+    Movement = { Noclip=false,NoFallDamage=false,ClickTP=false,Fly=false,FlySpeed=60,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Misc     = { ShowFPS=false },
-    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown }
+    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
+    Controls = { MenuKey=Enum.KeyCode.X }
 }
 
 -- Palette de couleurs
@@ -147,7 +148,7 @@ end)
 
 UserInputService.InputBegan:Connect(function(input,gpe)
     if gpe then return end
-    if input.KeyCode==Enum.KeyCode.X then
+    if input.KeyCode==Settings.Controls.MenuKey then
         if UIVisible then MinimizeMenu() else OpenMenu() end
     end
     if input.UserInputType==Enum.UserInputType.MouseButton1 and UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) then
@@ -393,7 +394,12 @@ Toggle("Vis","Lignes de visée","Visuals","Snaplines"); Toggle("Vis","ESP Arme",
 
 CreateTab("Mouvement","Mov",2)
 Toggle("Mov","Traverser les murs (Noclip)","Movement","Noclip"); Toggle("Mov","Sans dégâts de chute","Movement","NoFallDamage")
-Toggle("Mov","Téléportation Ctrl+Clic","Movement","ClickTP"); Sec("Mov","Utilitaires")
+Toggle("Mov","Téléportation Ctrl+Clic","Movement","ClickTP"); Sec("Mov","Vol du personnage")
+Toggle("Mov","Activer le fly","Movement","Fly")
+Slider("Mov","Vitesse du fly","Movement","FlySpeed",10,250)
+Keybind("Mov","Monter avec","Movement","FlyUpKey")
+Keybind("Mov","Descendre avec","Movement","FlyDownKey")
+Sec("Mov","Utilitaires")
 Btn("Mov","Mort rapide (Réapparition instantanée)",function()
     local c=LocalPlayer.Character; if c and c:FindFirstChild("Humanoid") then c.Humanoid.Health=0 end
 end)
@@ -444,6 +450,11 @@ Keybind("Car","Touche d'accélération","Vehicle","AccelKey")
 Slider("Car","Multiplicateur d'accélération","Vehicle","SpeedMultiplier",0,50,1000)
 Keybind("Car","Touche de frein","Vehicle","BrakeKey")
 Slider("Car","Force de freinage","Vehicle","BrakeForce",0,300,1000)
+Sec("Car","Vol du véhicule occupé")
+Toggle("Car","Activer le véhicule fly","Vehicle","Fly")
+Slider("Car","Vitesse du véhicule fly","Vehicle","FlySpeed",20,300)
+Keybind("Car","Monter avec","Vehicle","FlyUpKey")
+Keybind("Car","Descendre avec","Vehicle","FlyDownKey")
 
 CreateTab("Divers","Misc",5)
 Toggle("Misc","Afficher le compteur FPS","Misc","ShowFPS")
@@ -452,6 +463,47 @@ Btn("Misc","Boost FPS",function()
     for _,v in ipairs(workspace:GetDescendants()) do
         if v:IsA("BasePart") then v.Material=Enum.Material.SmoothPlastic; v.CastShadow=false
         elseif v:IsA("Decal") or v:IsA("Texture") or v:IsA("ParticleEmitter") or v:IsA("Trail") then pcall(function() v:Destroy() end) end
+    end
+end)
+
+-- Paramètres du menu et récupération locale.
+CreateTab("Paramètres","Settings",6)
+Sec("Settings","Contrôles du menu")
+Keybind("Settings","Touche ouvrir / fermer","Controls","MenuKey")
+Sec("Settings","Récupération locale")
+Btn("Settings","Ramener mon véhicule à moi",function(b)
+    local char=LocalPlayer.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+
+    -- Ne cible que le véhicule dans lequel le joueur local est assis.
+    local hum=char:FindFirstChildWhichIsA("Humanoid")
+    local seat=hum and hum.SeatPart
+    if seat and seat:IsA("VehicleSeat") then
+        local vehicle=seat:FindFirstAncestorWhichIsA("Model")
+        local part=vehicle and (vehicle.PrimaryPart or vehicle:FindFirstChildWhichIsA("BasePart"))
+        if part then
+            local offset=root.CFrame*CFrame.new(0,0,-8)
+            if vehicle.PrimaryPart then vehicle:SetPrimaryPartCFrame(offset) else part.CFrame=offset end
+        end
+    else
+        local old=b.Text; b.Text="  Assieds-toi dans ton véhicule d'abord"; task.delay(2,function() if b.Parent then b.Text=old end end)
+    end
+end)
+Btn("Settings","Me téléporter au véhicule le plus proche",function(b)
+    local char=LocalPlayer.Character
+    local root=char and char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    local nearest,dist
+    for _,obj in ipairs(workspace:GetDescendants()) do
+        if obj:IsA("VehicleSeat") and not obj.Occupant then
+            local d=(obj.Position-root.Position).Magnitude
+            if not dist or d<dist then nearest,dist=obj,d end
+        end
+    end
+    if nearest then root.CFrame=nearest.CFrame*CFrame.new(0,2,0)
+    else
+        local old=b.Text; b.Text="  Aucun siège libre trouvé"; task.delay(2,function() if b.Parent then b.Text=old end end)
     end
 end)
 Btn("Misc","Changer de serveur",function()
@@ -577,6 +629,21 @@ RunService.Heartbeat:Connect(function()
         if ray then root.AssemblyLinearVelocity=Vector3.new(root.AssemblyLinearVelocity.X,0,root.AssemblyLinearVelocity.Z) end
     end
 
+    if Settings.Movement.Fly and root and not (hum and hum.SeatPart) then
+        local cam=workspace.CurrentCamera
+        if cam then
+            local direction=Vector3.zero
+            if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction+=cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction-=cam.CFrame.LookVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction+=cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction-=cam.CFrame.RightVector end
+            if UserInputService:IsKeyDown(Settings.Movement.FlyUpKey) then direction+=Vector3.yAxis end
+            if UserInputService:IsKeyDown(Settings.Movement.FlyDownKey) then direction-=Vector3.yAxis end
+            root.AssemblyLinearVelocity=direction.Magnitude>0 and direction.Unit*Settings.Movement.FlySpeed or Vector3.zero
+            root.AssemblyAngularVelocity=Vector3.zero
+        end
+    end
+
     if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
         local seat=hum.SeatPart
         if Settings.Vehicle.AccelKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.AccelKey) then
@@ -584,6 +651,22 @@ RunService.Heartbeat:Connect(function()
         end
         if Settings.Vehicle.BrakeKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.BrakeKey) then
             seat.AssemblyLinearVelocity*=Vector3.new(1-Settings.Vehicle.BrakeForce,1,1-Settings.Vehicle.BrakeForce)
+        end
+        if Settings.Vehicle.Fly then
+            local vehicle=seat:FindFirstAncestorWhichIsA("Model")
+            local part=vehicle and (vehicle.PrimaryPart or vehicle:FindFirstChildWhichIsA("BasePart")) or seat
+            local cam=workspace.CurrentCamera
+            if part and cam then
+                local direction=Vector3.zero
+                if UserInputService:IsKeyDown(Enum.KeyCode.W) then direction+=cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.S) then direction-=cam.CFrame.LookVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.D) then direction+=cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction-=cam.CFrame.RightVector end
+                if UserInputService:IsKeyDown(Settings.Vehicle.FlyUpKey) then direction+=Vector3.yAxis end
+                if UserInputService:IsKeyDown(Settings.Vehicle.FlyDownKey) then direction-=Vector3.yAxis end
+                part.AssemblyLinearVelocity=direction.Magnitude>0 and direction.Unit*Settings.Vehicle.FlySpeed or Vector3.zero
+                part.AssemblyAngularVelocity=Vector3.zero
+            end
         end
     end
 end)
