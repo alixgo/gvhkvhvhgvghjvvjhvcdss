@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Diagnostic Dex MCP</title>
+<style>body{font:16px system-ui;max-width:700px;margin:60px auto;padding:20px;background:#191920;color:#eee}button{padding:14px;border:0;border-radius:8px;cursor:pointer}pre{white-space:pre-wrap;overflow-wrap:anywhere;padding:20px;background:#252530;border-radius:10px}</style>
+<h1>Diagnostic du relais Dex</h1>
+<p>Ce test vérifie une requête POST, la création d’une session et sa fermeture. Aucun code de connexion n’est affiché.</p>
+<button id="test">Tester le relais</button><pre id="output">Prêt.</pre>
+<script>
+const button=document.querySelector('#test'), output=document.querySelector('#output');
+async function post(body){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+ try {
+  const response=await fetch('./index.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),cache:'no-store',signal:controller.signal});
+  const text=await response.text();
+  let value;try{value=JSON.parse(text)}catch{throw Error('HTTP '+response.status+' : réponse non JSON. Vérifier PHP, les redirections et le filtrage de l’hébergement.')}
+  if(!response.ok)throw Error('HTTP '+response.status+' : '+(value.error||'Erreur serveur'));
+  return value;
+ }finally{clearTimeout(timer)}
+}
+button.onclick=async()=>{
+ button.disabled=true;output.textContent='Test POST et création de session…';let session;
+ try{
+  session=await post({action:'pair'});
+  if(typeof session.code!=='string'||typeof session.clientToken!=='string')throw Error('Réponse de création invalide');
+  output.textContent='POST : OK\nCréation de session et stockage PHP : OK\nFermeture de la session…';
+  await post({action:'close',code:session.code,clientToken:session.clientToken});session=null;
+  output.textContent='POST : OK\nCréation de session et stockage PHP : OK\nFermeture : OK\n\nLe relais fonctionne depuis ce navigateur. Si Dex expire encore, vérifier l’API HTTP de l’exécuteur et son accès au domaine.';
+ }catch(error){output.textContent+='\nÉchec : '+(error.name==='AbortError'?'aucune réponse sous 15 secondes':error.message);if(session)output.textContent+='\nLa session temporaire expirera automatiquement.'}
+ finally{button.disabled=false}
+};
+</script></html>

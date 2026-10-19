@@ -1,10 +1,21 @@
 -- BEGIN OPTIONAL DEX MCP BRIDGE
 do
 -- Hosted PHP relay bridge. No local HTTP server is needed by the Roblox client.
-local send=request or http_request or (syn and syn.request)
+local transports={}
+local seen={}
+local function addTransport(name,fn)
+    if type(fn)=="function" and not seen[fn] then
+        seen[fn]=true; table.insert(transports,{name=name,send=fn})
+    end
+end
+addTransport("request",request)
+addTransport("http_request",http_request)
+addTransport("http.request",type(http)=="table" and http.request)
+addTransport("syn.request",type(syn)=="table" and syn.request)
+local selectedTransport=nil
 local Players=game:GetService("Players")
 local player=Players.LocalPlayer
-if player and send then
+if player and #transports>0 then
     local http=game:GetService("HttpService")
     local relayUrl="https://script.noky.space/mcpdex++/index.php"
         local function resolve(path)
@@ -63,43 +74,59 @@ if player and send then
             error("Unknown operation")
         end
 
-    local function post(action,session,extra)
-        local body=extra or {}
-        body.action=action
-        if session then body.code=session.code; body.clientToken=session.clientToken end
-        -- Some executor HTTP APIs ignore Timeout: also bound the UI wait ourselves.
+    local function exchange(transport,body)
         local finished=false
         local worked,response
         local worker=task.spawn(function()
             worked,response=pcall(function()
-                local payload=http:JSONEncode(body)
-                return send({Url=relayUrl,Method="POST",Timeout=10,
+                return transport.send({Url=relayUrl,Method="POST",Timeout=8,
                     Headers={["Content-Type"]="application/json",["Accept"]="application/json"},
-                    Body=payload})
+                    Body=http:JSONEncode(body)})
             end)
             finished=true
         end)
-        local deadline=os.clock()+12
+        local deadline=os.clock()+10
         while not finished and os.clock()<deadline do task.wait(0.05) end
         if not finished then
             pcall(task.cancel,worker)
-            error("Délai dépassé (12 s). Vérifie l'adresse du relais et l'accès HTTP de l'exécuteur.")
+            error(transport.name.." : aucune réponse POST sous 10 s")
         end
-        assert(worked,"Échec HTTP : "..tostring(response))
-        assert(type(response)=="table","Réponse HTTP absente")
+        assert(worked,transport.name.." : "..tostring(response))
+        assert(type(response)=="table",transport.name.." : réponse HTTP absente")
         local statusCode=tonumber(response.StatusCode or response.Status or response.status_code or response.status)
         local raw=response.Body or response.body
-        if type(raw)~="string" or #raw==0 then
-            local fields={}
-            for name in pairs(response) do table.insert(fields,tostring(name)) end
-            table.sort(fields)
-            error("Réponse HTTP sans contenu JSON. Statut="..tostring(statusCode).." ; champs="..table.concat(fields,", "))
-        end
+        assert(type(raw)=="string" and #raw>0,transport.name.." : contenu absent (HTTP "..tostring(statusCode)..")")
         local valid,decoded=pcall(http.JSONDecode,http,raw)
-        assert(valid and type(decoded)=="table","Le relais ne renvoie pas du JSON (HTTP "..tostring(statusCode).."). Vérifie index.php et les redirections du serveur.")
+        assert(valid and type(decoded)=="table",transport.name.." : réponse non JSON (HTTP "..tostring(statusCode)..")")
+        return statusCode,decoded
+    end
+    local function selectTransport()
+        if selectedTransport then return end
+        local errors={}
+        for _,transport in ipairs(transports) do
+            print("[Dex MCP] Test POST : "..transport.name)
+            local ok,statusCode,body=pcall(exchange,transport,{action="status",code=string.rep("0",32)})
+            if ok and statusCode==404 and body.error=="Session not found" then
+                selectedTransport=transport
+                print("[Dex MCP] Transport validé : "..transport.name)
+                return
+            end
+            local message=ok and (transport.name.." : HTTP "..tostring(statusCode).." / "..tostring(body.error)) or tostring(statusCode)
+            table.insert(errors,message)
+            warn("[Dex MCP] "..message)
+        end
+        error("Aucun transport POST compatible. Détails dans F9 : "..table.concat(errors," ; "))
+    end
+    local function post(action,session,extra)
+        selectTransport()
+        local body=extra or {}
+        body.action=action
+        if session then body.code=session.code; body.clientToken=session.clientToken end
+        -- Never retry a session creation or write on a different transport.
+        local statusCode,decoded=exchange(selectedTransport,body)
         assert(statusCode==200,"HTTP "..tostring(statusCode).." : "..tostring(decoded.error or "Erreur relais"))
         if action=="pair" then
-            assert(type(decoded.code)=="string" and type(decoded.clientToken)=="string","Réponse de connexion invalide : code ou jeton absent")
+            assert(type(decoded.code)=="string" and type(decoded.clientToken)=="string","Réponse de connexion invalide")
         end
         return decoded
     end
@@ -140,7 +167,7 @@ if player and send then
         if busy then return end
         if active then stop(); return end
         busy=true; button.Text="Connexion…"
-        status.Text="Contact du relais PHP (12 secondes maximum)…"
+        status.Text="Test des fonctions HTTP disponibles (10 s maximum par fonction)…"
         local ok,session=pcall(post,"pair")
         busy=false
         if not alive then
