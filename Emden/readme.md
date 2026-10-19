@@ -1,1 +1,1 @@
-# https://raw.githubusercontent.com/alixgo/gvhkvhvhgvghjvvjhvcdss/refs/heads/main/Emden/emden.lua
+# loadstring(game:HttpGet("https://raw.githubusercontent.com/alixgo/gvhkvhvhgvghjvvjhvcdss/refs/heads/main/Emden/emden.lua"))()

@@ -1,1 +1,1 @@
-# https://raw.githubusercontent.com/alixgo/gvhkvhvhgvghjvvjhvcdss/refs/heads/main/My%20emote/my-emote.lua
+# loadstring(game:HttpGet("https://raw.githubusercontent.com/alixgo/gvhkvhvhgvghjvvjhvcdss/refs/heads/main/My%20emote/my-emote.lua"))()

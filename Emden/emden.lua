@@ -7,11 +7,16 @@ local RunService = game:GetService("RunService")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
 local LocalPlayer = Players.LocalPlayer
+if not LocalPlayer then
+    error("Emden doit être lancé côté client, dans un LocalScript.")
+end
 local Mouse = LocalPlayer:GetMouse()
 
-for _, v in pairs(CoreGui:GetChildren()) do
-    if v.Name == "Noky_EmdenUI" then v:Destroy() end
-end
+pcall(function()
+    for _, v in pairs(CoreGui:GetChildren()) do
+        if v.Name == "Noky_EmdenUI" then v:Destroy() end
+    end
+end)
 if LocalPlayer:FindFirstChild("PlayerGui") then
     for _, v in pairs(LocalPlayer.PlayerGui:GetChildren()) do
         if v.Name == "Noky_EmdenUI" then v:Destroy() end
@@ -133,7 +138,7 @@ FloatBtn.MouseButton1Click:Connect(OpenMenu)
 -- Glissement
 local dragging,dragInput,dragStart,startPos
 MainFrame.InputBegan:Connect(function(i)
-    if i.UserInputType==Enum.UserInputType.MouseButton1 and i.Target ~= MinimizeBtn then
+    if i.UserInputType==Enum.UserInputType.MouseButton1 then
         dragging=true; dragStart=i.Position; startPos=MainFrame.Position
         i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dragging=false end end)
     end
@@ -243,7 +248,7 @@ local function CreateTab(text,id,idx)
     btn.Size=UDim2.new(1,-20,0,36); btn.Position=UDim2.new(0,10,0,88+(idx*44))
     btn.BackgroundColor3=Theme.Surface; btn.BorderSizePixel=0
     btn.Text="  "..text; btn.TextColor3=Theme.TextMuted
-    btn.Font=Enum.Font.GothamSemibold; btn.TextSize=13; btn.TextXAlignment=Enum.TextXAlignment.Left
+    btn.Font=Enum.Font.GothamBold; btn.TextSize=13; btn.TextXAlignment=Enum.TextXAlignment.Left
     Instance.new("UICorner",btn).CornerRadius=UDim.new(0,6)
     btn.MouseEnter:Connect(function()
         TweenService:Create(btn,TweenInfo.new(0.15),{BackgroundColor3=Theme.SurfaceLight}):Play()
