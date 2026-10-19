@@ -28,7 +28,7 @@ local Settings = {
     ESPColors= { Box=Color3.fromRGB(255,255,255) },
     Movement = { Noclip=false,NoFallDamage=false,ClickTP=false,Fly=false,FlySpeed=60,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Misc     = { ShowFPS=false },
-    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
+    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyResponsiveness=2.5,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Controls = { MenuKey=Enum.KeyCode.X }
 }
 
@@ -458,6 +458,7 @@ Slider("Car","Force de freinage","Vehicle","BrakeForce",0,300,1000)
 Sec("Car","Vol du véhicule occupé")
 Toggle("Car","Activer le véhicule fly","Vehicle","Fly")
 Slider("Car","Vitesse du véhicule fly","Vehicle","FlySpeed",20,300)
+Slider("Car","Lissage du véhicule fly","Vehicle","FlyResponsiveness",5,50,10)
 Keybind("Car","Monter avec","Vehicle","FlyUpKey")
 Keybind("Car","Descendre avec","Vehicle","FlyDownKey")
 
@@ -617,7 +618,7 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 
 -- MOUVEMENT ET VÉHICULE
-RunService.Heartbeat:Connect(function()
+RunService.Heartbeat:Connect(function(dt)
     local char=LocalPlayer.Character; if not char then return end
     local root=char:FindFirstChild("HumanoidRootPart")
     local hum=char:FindFirstChildWhichIsA("Humanoid")
@@ -669,8 +670,12 @@ RunService.Heartbeat:Connect(function()
                 if UserInputService:IsKeyDown(Enum.KeyCode.A) then direction-=cam.CFrame.RightVector end
                 if UserInputService:IsKeyDown(Settings.Vehicle.FlyUpKey) then direction+=Vector3.yAxis end
                 if UserInputService:IsKeyDown(Settings.Vehicle.FlyDownKey) then direction-=Vector3.yAxis end
-                part.AssemblyLinearVelocity=direction.Magnitude>0 and direction.Unit*Settings.Vehicle.FlySpeed or Vector3.zero
-                part.AssemblyAngularVelocity=Vector3.zero
+                -- Ease toward the requested velocity, preserving momentum on release.
+                -- This avoids the abrupt zero-velocity change that can trigger crash logic.
+                local currentVelocity=part.AssemblyLinearVelocity
+                local targetVelocity=direction.Magnitude>0 and direction.Unit*Settings.Vehicle.FlySpeed or Vector3.zero
+                local alpha=1-math.exp(-Settings.Vehicle.FlyResponsiveness*dt)
+                part.AssemblyLinearVelocity=currentVelocity:Lerp(targetVelocity,alpha)
             end
         end
     end
