@@ -65,10 +65,40 @@ if player and send then
         local body=extra or {}
         body.action=action
         if session then body.code=session.code; body.clientToken=session.clientToken end
-        local response=send({Url=relayUrl,Method="POST",Headers={["Content-Type"]="application/json"},Body=http:JSONEncode(body)})
-        assert(response,"Relais inaccessible")
-        local decoded=http:JSONDecode(response.Body)
-        assert(response.StatusCode==200,decoded.error or "Erreur HTTP relais")
+        -- Some executor HTTP APIs ignore Timeout: also bound the UI wait ourselves.
+        local finished=false
+        local worked,response
+        local worker=task.spawn(function()
+            worked,response=pcall(function()
+                local payload=http:JSONEncode(body)
+                return send({Url=relayUrl,Method="POST",Timeout=10,
+                    Headers={["Content-Type"]="application/json",["Accept"]="application/json"},
+                    Body=payload})
+            end)
+            finished=true
+        end)
+        local deadline=os.clock()+12
+        while not finished and os.clock()<deadline do task.wait(0.05) end
+        if not finished then
+            pcall(task.cancel,worker)
+            error("Délai dépassé (12 s). Vérifie l'adresse du relais et l'accès HTTP de l'exécuteur.")
+        end
+        assert(worked,"Échec HTTP : "..tostring(response))
+        assert(type(response)=="table","Réponse HTTP absente")
+        local statusCode=tonumber(response.StatusCode or response.Status or response.status_code or response.status)
+        local raw=response.Body or response.body
+        if type(raw)~="string" or #raw==0 then
+            local fields={}
+            for name in pairs(response) do table.insert(fields,tostring(name)) end
+            table.sort(fields)
+            error("Réponse HTTP sans contenu JSON. Statut="..tostring(statusCode).." ; champs="..table.concat(fields,", "))
+        end
+        local valid,decoded=pcall(http.JSONDecode,http,raw)
+        assert(valid and type(decoded)=="table","Le relais ne renvoie pas du JSON (HTTP "..tostring(statusCode).."). Vérifie index.php et les redirections du serveur.")
+        assert(statusCode==200,"HTTP "..tostring(statusCode).." : "..tostring(decoded.error or "Erreur relais"))
+        if action=="pair" then
+            assert(type(decoded.code)=="string" and type(decoded.clientToken)=="string","Réponse de connexion invalide : code ou jeton absent")
+        end
         return decoded
     end
     local gui=Instance.new("ScreenGui")
@@ -108,13 +138,18 @@ if player and send then
         if busy then return end
         if active then stop(); return end
         busy=true; button.Text="Connexion…"
+        status.Text="Contact du relais PHP (12 secondes maximum)…"
         local ok,session=pcall(post,"pair")
         busy=false
         if not alive then
             if ok then pcall(post,"close",session) end
             return
         end
-        if not ok then button.Text="Réessayer"; status.Text=tostring(session); return end
+        if not ok then
+            button.Text="Réessayer"; status.Text=tostring(session)
+            warn("[Dex MCP] "..tostring(session))
+            return
+        end
         active=session
         codeBox.Text=session.code
         button.Text="Désactiver le MCP"
