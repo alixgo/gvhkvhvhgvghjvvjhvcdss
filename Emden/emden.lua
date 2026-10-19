@@ -26,11 +26,78 @@ end
 local Settings = {
     Visuals  = { Enable=false,Box=false,Name=false,Health=false,Distance=false,Skeleton=false,Snaplines=false,Weapon=false,MaxDistance=1000 },
     ESPColors= { Box=Color3.fromRGB(255,255,255) },
-    Movement = { Noclip=false,NoFallDamage=false,ClickTP=false,Fly=false,FlySpeed=60,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
+    Movement = { Noclip=false,NoFallDamage=false,GodMode=false,UnlimitedEnergy=false,ClickTP=false,Fly=false,FlySpeed=60,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Misc     = { ShowFPS=false },
-    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyResponsiveness=2.5,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
+    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyResponsiveness=2.5,UnlimitedHealth=false,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Controls = { MenuKey=Enum.KeyCode.X }
 }
+
+-- Adaptateurs des ressources propres au jeu : renseigner les chemins exacts.
+-- Les chemins partent du Player (énergie) ou du Model du véhicule (santé).
+-- Exemple de format : Path={"Stats","Energy"}, Maximum=100.
+local ResourceBindings = {
+    Energy = { Path={}, Maximum=nil, Names={energy=true,stamina=true,endurance=true} },
+    VehicleHealth = { Path={}, Maximum=nil, Names={health=true,vehiclehealth=true,durability=true} }
+}
+
+-- Cache les recherches pour ne pas parcourir le véhicule à chaque image.
+local ResourceCache=setmetatable({}, {__mode="k"})
+local function RefillResource(owner,binding)
+    if not owner then return end
+    if #binding.Path>0 and type(binding.Maximum)=="number" then
+        local value=owner
+        for _,name in ipairs(binding.Path) do
+            value=value:FindFirstChild(name)
+            if not value then return end
+        end
+        if (value:IsA("NumberValue") or value:IsA("IntValue")) and value.Value<binding.Maximum then
+            value.Value=binding.Maximum
+        end
+        return
+    end
+    local cache=ResourceCache[owner]
+    if not cache then cache={}; ResourceCache[owner]=cache end
+    local entry=cache[binding]
+    if not entry or os.clock()-entry.time>3 then
+        entry={time=os.clock(),targets={}}
+        cache[binding]=entry
+        local nodes={owner}
+        for _,node in ipairs(owner:GetDescendants()) do table.insert(nodes,node) end
+        for _,node in ipairs(nodes) do
+            -- Valeurs numériques avec maximum explicite dans un attribut ou un voisin.
+            if (node:IsA("NumberValue") or node:IsA("IntValue")) and binding.Names[string.lower(node.Name)] then
+                local maximum=node:GetAttribute("MaxValue") or node:GetAttribute("Max")
+                local sibling=node.Parent and node.Parent:FindFirstChild("Max"..node.Name)
+                if sibling and (sibling:IsA("NumberValue") or sibling:IsA("IntValue")) then maximum=sibling.Value end
+                if type(maximum)=="number" and maximum>0 then
+                    table.insert(entry.targets,{node=node,maximum=maximum})
+                end
+            end
+            -- Ressources stockées comme attributs : Energy / MaxEnergy, etc.
+            for name,value in pairs(node:GetAttributes()) do
+                if type(value)=="number" and binding.Names[string.lower(name)] then
+                    local maximum=node:GetAttribute("Max"..name)
+                    if type(maximum)=="number" and maximum>0 then
+                        table.insert(entry.targets,{node=node,attribute=name,maximum=maximum})
+                    end
+                end
+            end
+        end
+        if #entry.targets==0 then
+            warn("[Emden] Aucune ressource avec maximum explicite trouvée dans "..owner:GetFullName())
+        end
+    end
+    for _,target in ipairs(entry.targets) do
+        if target.node.Parent then
+            if target.attribute then
+                local value=target.node:GetAttribute(target.attribute)
+                if type(value)=="number" and value<target.maximum then target.node:SetAttribute(target.attribute,target.maximum) end
+            elseif target.node.Value<target.maximum then
+                target.node.Value=target.maximum
+            end
+        end
+    end
+end
 
 -- Palette de couleurs
 local Theme = {
@@ -398,6 +465,8 @@ Toggle("Vis","ESP Distance","Visuals","Distance"); Toggle("Vis","ESP Squelette",
 Toggle("Vis","Lignes de visée","Visuals","Snaplines"); Toggle("Vis","ESP Arme","Visuals","Weapon")
 
 CreateTab("Mouvement","Mov",2)
+Toggle("Mov","God mode local","Movement","GodMode")
+Toggle("Mov","Énergie illimitée (détection auto)","Movement","UnlimitedEnergy")
 Toggle("Mov","Traverser les murs (Noclip)","Movement","Noclip"); Toggle("Mov","Sans dégâts de chute","Movement","NoFallDamage")
 Toggle("Mov","Téléportation Ctrl+Clic","Movement","ClickTP"); Sec("Mov","Vol du personnage")
 Toggle("Mov","Activer le fly","Movement","Fly")
@@ -451,6 +520,7 @@ for _,cat in ipairs(TPs) do Sec("TP",cat[1]); for _,loc in ipairs(cat[2]) do Btn
 
 -- Boost Voiture
 CreateTab("Boost Voiture","Car",4); Sec("Car","Réglages Voiture")
+Toggle("Car","Vie illimitée (détection auto)","Vehicle","UnlimitedHealth")
 Keybind("Car","Touche d'accélération","Vehicle","AccelKey")
 Slider("Car","Multiplicateur d'accélération","Vehicle","SpeedMultiplier",0,50,1000)
 Keybind("Car","Touche de frein","Vehicle","BrakeKey")
@@ -623,6 +693,15 @@ RunService.Heartbeat:Connect(function(dt)
     local root=char:FindFirstChild("HumanoidRootPart")
     local hum=char:FindFirstChildWhichIsA("Humanoid")
 
+    -- Restaure la santé locale tant que le personnage est vivant.
+    if Settings.Movement.GodMode and hum and hum.Health>0 and hum.Health<hum.MaxHealth then
+        hum.Health=hum.MaxHealth
+    end
+    if Settings.Movement.UnlimitedEnergy then
+        RefillResource(LocalPlayer,ResourceBindings.Energy)
+        if char then RefillResource(char,ResourceBindings.Energy) end
+    end
+
     if Settings.Movement.Noclip then
         for _,p in pairs(char:GetChildren()) do
             if p:IsA("BasePart") and p.CanCollide then p.CanCollide=false end
@@ -652,6 +731,9 @@ RunService.Heartbeat:Connect(function(dt)
 
     if hum and hum.SeatPart and hum.SeatPart:IsA("VehicleSeat") then
         local seat=hum.SeatPart
+        if Settings.Vehicle.UnlimitedHealth then
+            RefillResource(seat:FindFirstAncestorWhichIsA("Model"),ResourceBindings.VehicleHealth)
+        end
         if Settings.Vehicle.AccelKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.AccelKey) then
             seat.AssemblyLinearVelocity*=Vector3.new(1+Settings.Vehicle.SpeedMultiplier,1,1+Settings.Vehicle.SpeedMultiplier)
         end
