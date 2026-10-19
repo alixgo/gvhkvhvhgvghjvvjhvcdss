@@ -26,9 +26,9 @@ end
 local Settings = {
     Visuals  = { Enable=false,Box=false,Name=false,Health=false,Distance=false,Skeleton=false,Snaplines=false,Weapon=false,MaxDistance=1000 },
     ESPColors= { Box=Color3.fromRGB(255,255,255) },
-    Movement = { Noclip=false,NoFallDamage=false,GodMode=false,UnlimitedEnergy=false,ClickTP=false,Fly=false,FlySpeed=60,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
+    Movement = { SpeedHack=false,WalkSpeed=50,Noclip=false,NoFallDamage=false,GodMode=false,UnlimitedEnergy=false,ClickTP=false,Fly=false,FlySpeed=60,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Misc     = { ShowFPS=false },
-    Vehicle  = { SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyResponsiveness=2.5,UnlimitedHealth=false,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
+    Vehicle  = { Turbo=false,TurboSpeed=350,TurboAcceleration=45,TurboKey=Enum.KeyCode.LeftShift,SpeedMultiplier=0.025,BrakeForce=0.150,AccelKey=Enum.KeyCode.Unknown,BrakeKey=Enum.KeyCode.Unknown,Fly=false,FlySpeed=100,FlyResponsiveness=2.5,UnlimitedHealth=false,FlyUpKey=Enum.KeyCode.Space,FlyDownKey=Enum.KeyCode.LeftControl },
     Controls = { MenuKey=Enum.KeyCode.X }
 }
 
@@ -465,6 +465,10 @@ Toggle("Vis","ESP Distance","Visuals","Distance"); Toggle("Vis","ESP Squelette",
 Toggle("Vis","Lignes de visée","Visuals","Snaplines"); Toggle("Vis","ESP Arme","Visuals","Weapon")
 
 CreateTab("Mouvement","Mov",2)
+Sec("Mov","Vitesse du personnage")
+Toggle("Mov","Activer le speedhack","Movement","SpeedHack")
+Slider("Mov","Vitesse de course (studs/s)","Movement","WalkSpeed",16,200)
+Sec("Mov","Protection et déplacement")
 Toggle("Mov","God mode local","Movement","GodMode")
 Toggle("Mov","Énergie illimitée (détection auto)","Movement","UnlimitedEnergy")
 Toggle("Mov","Traverser les murs (Noclip)","Movement","Noclip"); Toggle("Mov","Sans dégâts de chute","Movement","NoFallDamage")
@@ -525,6 +529,11 @@ Keybind("Car","Touche d'accélération","Vehicle","AccelKey")
 Slider("Car","Multiplicateur d'accélération","Vehicle","SpeedMultiplier",0,50,1000)
 Keybind("Car","Touche de frein","Vehicle","BrakeKey")
 Slider("Car","Force de freinage","Vehicle","BrakeForce",0,300,1000)
+Sec("Car","Turbo progressif")
+Toggle("Car","Activer le turbo","Vehicle","Turbo")
+Keybind("Car","Maintenir pour le turbo","Vehicle","TurboKey")
+Slider("Car","Vitesse turbo (studs/s)","Vehicle","TurboSpeed",50,600)
+Slider("Car","Accélération turbo (studs/s²)","Vehicle","TurboAcceleration",5,100)
 Sec("Car","Vol du véhicule occupé")
 Toggle("Car","Activer le véhicule fly","Vehicle","Fly")
 Slider("Car","Vitesse du véhicule fly","Vehicle","FlySpeed",20,300)
@@ -688,10 +697,31 @@ Players.PlayerRemoving:Connect(function(p)
 end)
 
 -- MOUVEMENT ET VÉHICULE
-RunService.Heartbeat:Connect(function(dt)
+local speedHumanoid,originalWalkSpeed
+local function RestoreWalkSpeed()
+    if speedHumanoid and speedHumanoid.Parent and originalWalkSpeed then
+        speedHumanoid.WalkSpeed=originalWalkSpeed
+    end
+    speedHumanoid=nil
+    originalWalkSpeed=nil
+end
+local movementConnection
+movementConnection=RunService.Heartbeat:Connect(function(dt)
     local char=LocalPlayer.Character; if not char then return end
     local root=char:FindFirstChild("HumanoidRootPart")
     local hum=char:FindFirstChildWhichIsA("Humanoid")
+
+    -- Sauvegarder la vitesse propre à chaque personnage avant de la remplacer.
+    if speedHumanoid and (speedHumanoid~=hum or not Settings.Movement.SpeedHack) then
+        RestoreWalkSpeed()
+    end
+    if Settings.Movement.SpeedHack and hum and hum.Health>0 then
+        if speedHumanoid~=hum then
+            speedHumanoid=hum
+            originalWalkSpeed=hum.WalkSpeed
+        end
+        hum.WalkSpeed=Settings.Movement.WalkSpeed
+    end
 
     -- Restaure la santé locale tant que le personnage est vivant.
     if Settings.Movement.GodMode and hum and hum.Health>0 and hum.Health<hum.MaxHealth then
@@ -734,11 +764,33 @@ RunService.Heartbeat:Connect(function(dt)
         if Settings.Vehicle.UnlimitedHealth then
             RefillResource(seat:FindFirstAncestorWhichIsA("Model"),ResourceBindings.VehicleHealth)
         end
-        if Settings.Vehicle.AccelKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.AccelKey) then
-            seat.AssemblyLinearVelocity*=Vector3.new(1+Settings.Vehicle.SpeedMultiplier,1,1+Settings.Vehicle.SpeedMultiplier)
-        end
-        if Settings.Vehicle.BrakeKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.BrakeKey) then
-            seat.AssemblyLinearVelocity*=Vector3.new(1-Settings.Vehicle.BrakeForce,1,1-Settings.Vehicle.BrakeForce)
+        -- Le fly possède son propre contrôleur : éviter deux commandes concurrentes.
+        if not Settings.Vehicle.Fly then
+            local velocity=seat.AssemblyLinearVelocity
+            local horizontal=Vector3.new(velocity.X,0,velocity.Z)
+            local speed=horizontal.Magnitude
+            local frameTime=math.min(dt,0.05)
+            local braking=Settings.Vehicle.BrakeKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.BrakeKey)
+            if braking then
+                local factor=math.pow(1-math.clamp(Settings.Vehicle.BrakeForce,0,1),frameTime*60)
+                horizontal*=factor
+            else
+                if Settings.Vehicle.AccelKey~=Enum.KeyCode.Unknown and UserInputService:IsKeyDown(Settings.Vehicle.AccelKey) and speed>0 then
+                    local boosted=math.min(speed*math.pow(1+Settings.Vehicle.SpeedMultiplier,frameTime*60),Settings.Vehicle.TurboSpeed)
+                    horizontal=horizontal.Unit*math.max(speed,boosted)
+                end
+                if Settings.Vehicle.Turbo and UserInputService:IsKeyDown(Settings.Vehicle.TurboKey) and not UserInputService:GetFocusedTextBox() then
+                    local forward=Vector3.new(seat.CFrame.LookVector.X,0,seat.CFrame.LookVector.Z)
+                    if forward.Magnitude>0.001 then
+                        local target=forward.Unit*Settings.Vehicle.TurboSpeed
+                        local difference=target-horizontal
+                        local step=Settings.Vehicle.TurboAcceleration*frameTime
+                        if difference.Magnitude>step then horizontal+=difference.Unit*step else horizontal=target end
+                    end
+                end
+            end
+            -- Préserver la vitesse verticale et l'inertie quand on relâche le turbo.
+            seat.AssemblyLinearVelocity=Vector3.new(horizontal.X,velocity.Y,horizontal.Z)
         end
         if Settings.Vehicle.Fly then
             local vehicle=seat:FindFirstAncestorWhichIsA("Model")
@@ -761,6 +813,11 @@ RunService.Heartbeat:Connect(function(dt)
             end
         end
     end
+end)
+
+sg.Destroying:Connect(function()
+    movementConnection:Disconnect()
+    RestoreWalkSpeed()
 end)
 
 print("[+] Noky Script Emden V10 chargé avec succès !")
